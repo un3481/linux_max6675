@@ -27,7 +27,6 @@
 
 use std::io::Read;
 use spidev::{ Spidev, SpidevOptions, SpiModeFlags };
-use simmer::Temperature;
 use thiserror::Error;
 
 /// An error emitted due to problems with the MAX6675.
@@ -47,7 +46,7 @@ pub enum Max6675Error {
 /// A representation of the MAX6675 thermocouple digitizer.
 #[derive(Debug)]
 pub struct Max6675 {
-    spi: Option<Spidev>
+    pub spi: Option<Spidev>
 }
 
 impl Max6675 {
@@ -58,14 +57,21 @@ impl Max6675 {
     ///
     /// ```
     /// use linux_max6675::Max6675;
+    /// use std::sync::Mutex;
+    /// use anyhow::Result;
     ///
-    /// match Max6675::new("/dev/spidev0.0") {
-    ///     Ok(_thermo) => {
-    ///         println!("success! woohoo");
-    ///     }
-    ///     Err(e) => {
-    ///         println!("oh noooo big scary error {e}");
-    ///     }
+    /// static TC1: Mutex<Max6675> = Mutex::new(Max6675::new());
+    ///
+    /// fn main() -> Result<()> {
+    ///     let tc = TC1.lock()
+    ///         .unwrap();
+    ///
+    ///     (*tc).connect("/dev/spidev0.0")?;
+    ///     if (*tc).is_open()? {
+    ///         println("thermocouple is open!")
+    ///     };
+    ///
+    ///     Ok(())
     /// }
     /// ````
     pub const fn new() -> Self {
@@ -75,16 +81,22 @@ impl Max6675 {
     /// Tries to create a new `Spidev` connection.
     /// Only fails if there's something wrong with the SPI connection.
     pub fn connect(&mut self, spi_path: impl AsRef<str>) -> Result<&mut Self, Max6675Error> {
+        // Open SPI connection
         let mut spi = Spidev::open(spi_path.as_ref())?;
-        spi.configure(
-            &SpidevOptions::new()
-                .bits_per_word(8)
-                .max_speed_hz(1_000_000)
-                .mode(SpiModeFlags::SPI_MODE_1)
-                .build(),
-        )?;
+        let options = SpidevOptions::new()
+            .bits_per_word(8)
+            .max_speed_hz(1_000_000)
+            .mode(SpiModeFlags::SPI_MODE_1)
+            .build();
+        spi.configure(&options)?;
+        // Store the connection
         self.spi = Some(spi);
         Ok(self)
+    }
+
+    /// Checks if SPI connection is initialized
+    pub fn is_initialized(&mut self) -> bool {
+        self.spi.is_some()
     }
 
     /// Tries to return the thermocouple's raw data for data science. (and other fun little things)
@@ -95,30 +107,37 @@ impl Max6675 {
     /// ## Example
     ///
     /// ```no_run
-    /// # use linux_max6675::Max6675;
-    /// # fn main() -> anyhow::Result<()> {
-    /// let mut thermo = Max6675::new("/dev/spidev0.0")?;
-    /// let res = thermo.read_raw()?;
-    /// println!("oOoo here's my favorite bytes: [{}, {}]", res[0], res[1]);
-    /// # Ok(())
-    /// # }
+    /// use linux_max6675::Max6675;
+    /// use anyhow::Result;
+    ///
+    /// fn main() -> Result<()> {
+    ///     let tc = Max6675::new()
+    ///         .connect("/dev/spidev0.0")?
+    ///         .deref();
+    ///     
+    ///     let bytes = tc.read_bytes()?;
+    ///     println!("oOoo here's my favorite bytes: {}", bytes);
+    ///     
+    ///     Ok(())
+    /// }
     /// ````
     pub fn read_bytes(&mut self) -> Result<u16, Max6675Error> {
+        // Read MISO bytes into buffer
         let mut buf = [0_u8; 2];
-        self.spi.ok_or(Err(Max6675Error::SpiUninitialized))?
+        self.spi
+            .ok_or(Max6675Error::SpiUninitialized)?
             .read_exact(&mut buf)?;
+        // Convert buffer into word
         Ok(u16::from_be_bytes(buf))
     }
 
-    /// Tries to grab temperature data from MAX6675 and convert the results
-    /// to an `f64` in degrees Celsius.
-    pub fn read_float(&mut self) -> Result<f64, Max6675Error> {
+    /// Check if thermocouple input is open (-T must be grounded).
+    pub fn is_open(&mut self) -> Result<bool, Max6675Error> {
+        // Read MISO bytes
         let bytes = self.read_bytes()?;
-        // check for Bit D2 being high, indicating that the thermocouple input is open
+        // Check for Bit D2 being high, indicating that the thermocouple input is open
         // (see MAX6675 datasheet, p. 5)
-        if bytes & 0x04 { Err(Max6675Error::OpenCircuitError)? };
-        // ripped from the Arduino library (see: https://github.com/RobTillaart/MAX6675)
-        Ok((0x1FFF & (bytes >> 3)) as f64) * 0.25)
+        Ok((bytes & 0x04) != 0)
     }
 
     /// Tries to read the thermocouple's temperature in Celsius.
@@ -126,14 +145,35 @@ impl Max6675 {
     /// ## Example
     ///
     /// ```no_run
-    /// # use linux_max6675::Max6675;
-    /// # fn main() -> anyhow::Result<()> {
-    /// let mut thermo = Max6675::new("/dev/spidev0.0")?;
-    /// println!("it's {}° celsius in here!", thermo.read_celsius()?);
-    /// # Ok(())
-    /// # }
+    /// use linux_max6675::Max6675;
+    /// use simmer::Temperature;
+    /// use anyhow::Result;
+    ///
+    /// fn main() -> Result<()> {
+    ///     let tc = Max6675::new()
+    ///         .connect("/dev/spidev0.0")?
+    ///         .deref();
+    ///     
+    ///     let celsius = tc.read_celsius()?;
+    ///     println!("it's {}° celsius in here!", celsius);
+    ///     
+    ///     let kelvin = tc.read_celsius()
+    ///         .map(|temp| Temperature::Celsius(temp))?
+    ///         .to_kelvin();
+    ///     println!("it's {}° kelvin in here!", kelvin);
+    ///     
+    ///     Ok(())
+    /// }
     /// ```
-    pub fn read_celsius(&mut self) -> Result<Temperature, Max6675Error> {
-        self.read_float().map(|temp| Temperature::Celsius(temp))
+    pub fn read_celsius(&mut self) -> Result<f64, Max6675Error> {
+        // Read MISO bytes
+        let bytes = self.read_bytes()?;
+        // Check for input open
+        ((bytes & 0x04) != 0)
+            .then(|| Err(Max6675Error::OpenCircuitError))
+            .map_or(Ok(()), |e| e)?;
+        // Extract 12 bit integer from D14-D3 and multiply it by 1/4 precision factor
+        // (see MAX6675 datasheet, p. 5)
+        Ok((0x1FFF & (bytes >> 3)) as f64) * 0.25)
     }
 }
