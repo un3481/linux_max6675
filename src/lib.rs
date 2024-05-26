@@ -134,6 +134,6 @@ impl Max6675 {
     /// # }
     /// ```
     pub fn read_celsius(&mut self) -> Result<Temperature, Max6675Error> {
-        Ok(Temperature::Celsius(self.read_float()?))
+        self.read_float().map(|temp| Temperature::Celsius(temp))
     }
 }
