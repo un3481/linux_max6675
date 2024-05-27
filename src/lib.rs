@@ -132,12 +132,17 @@ impl Max6675 {
     }
 
     /// Check if thermocouple input is open (-T must be grounded).
-    pub fn is_open(&mut self) -> Result<bool, Max6675Error> {
-        // Read MISO bytes
-        let bytes = self.read_bytes()?;
+    pub fn is_open(bytes: u16) -> bool {
         // Check for Bit D2 being high, indicating that the thermocouple input is open
         // (see MAX6675 datasheet, p. 5)
-        Ok((bytes & 0x04) != 0)
+        (bytes & 0x04) != 0
+    }
+
+    /// Parse temperature from bytes
+    pub fn parse_celsius(bytes: u16) -> f64 {
+        // Extract 12 bit integer from D14-D3 and multiply it by 1/4 precision factor
+        // (see MAX6675 datasheet, p. 5)
+        ((0x1FFF & (bytes >> 3)) as f64) * 0.25
     }
 
     /// Tries to read the thermocouple's temperature in Celsius.
@@ -169,11 +174,10 @@ impl Max6675 {
         // Read MISO bytes
         let bytes = self.read_bytes()?;
         // Check for input open
-        ((bytes & 0x04) != 0)
+        Self::is_open(bytes)
             .then(|| Err(Max6675Error::OpenCircuitError))
             .map_or(Ok(()), |e| e)?;
-        // Extract 12 bit integer from D14-D3 and multiply it by 1/4 precision factor
-        // (see MAX6675 datasheet, p. 5)
-        Ok((0x1FFF & (bytes >> 3)) as f64) * 0.25)
+        // Parse temperature from bytes
+        Ok(Self::parse_celsius(bytes))
     }
 }
