@@ -80,7 +80,7 @@ impl Max6675 {
 
     /// Tries to create a new `Spidev` connection.
     /// Only fails if there's something wrong with the SPI connection.
-    pub fn connect(&mut self, spi_path: impl AsRef<str>) -> Result<&Self, Max6675Error> {
+    pub fn connect(&mut self, spi_path: impl AsRef<str>) -> Result<&mut Self, Max6675Error> {
         // Open SPI connection
         let mut spi = Spidev::open(spi_path.as_ref())?;
         let options = SpidevOptions::new()
