@@ -124,8 +124,7 @@ impl Max6675 {
     pub fn read_bytes(&mut self) -> Result<u16, Max6675Error> {
         // Read MISO bytes into buffer
         let mut buf = [0_u8; 2];
-        self.spi
-            .map(|spi| spi.as_ref())
+        self.spi.as_ref()
             .ok_or(Max6675Error::SpiUninitialized)?
             .read_exact(&mut buf)?;
         // Convert buffer into word
