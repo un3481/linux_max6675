@@ -49,7 +49,7 @@ pub const SPI_OPTIONS: SpidevOptions = SpidevOptions {
     max_speed_hz: Some(1_000_000),
     lsb_first: None,
     spi_mode: Some(SpiModeFlags::SPI_MODE_1),
-}
+};
 
 /// Tries to create a new `Max6675` based on the given SPI path.
 /// A valid SPI path usually looks like `/dev/spidev0.0`.
@@ -72,7 +72,7 @@ pub fn open(path: impl AsRef<str>) -> Result<Spidev, Max6675Error> {
     // Open SPI connection
     let mut spi = Spidev::open(path.as_ref())?;
     // Configure SPI for MAX6675
-    spi.configure(Self::SPI_OPTIONS)?;
+    spi.configure(&SPI_OPTIONS)?;
     // Return SPI connection
     Ok(spi)
 }
@@ -133,7 +133,7 @@ pub fn parse_celsius(bytes: u16) -> f64 {
 /// ```
 pub fn read_celsius(spi: &mut Spidev) -> Result<f64, Max6675Error> {
     // Read bytes from SPI
-    let bytes = read_bytes(&mut spi)?;
+    let bytes = read_bytes(spi)?;
     // Check if MAX6675 terminals are open
     is_open(bytes)
         .then(|| Err(Max6675Error::OpenCircuitError))
