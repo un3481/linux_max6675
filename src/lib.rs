@@ -10,93 +10,53 @@
 //! Then, you can use something like this example in your binary...
 //!
 //! ```no_run
-//! fn main() -> anyhow::Result<()> {
-//!     use linux_max6675::Max6675;
-//!     use std::time::Duration;
 //!
-//!     let mut max = Max6675::new("/dev/spidev0.0")?;
+//! use rppal::spi::{ Spi, Bus, SlaveSelect, Mode };
+//! use std::time::Duration;
 //!
-//!     std::thread::sleep(Duration::from_secs(3));
+//! let mut tc = Spi::new(
+//!     Bus::Spi0,
+//!     SlaveSelect::Ss0,
+//!     1_000_000,
+//!     Mode::Mode1
+//! ).unwrap();
 //!
-//!     loop {
-//!         println!("Read Celsius! Got: {}° C.", max.read_celsius()?);
-//!         std::thread::sleep(Duration::from_millis(500));
-//!     }
-//! }
+//! std::thread::sleep(Duration::from_secs(3));
+//!
+//! loop {
+//!     let celsius = linux_max6675::read_celsius(&mut tc).unwrap();
+//!     println!("Read Celsius! Got: {}° C.", celsius);
+//!     std::thread::sleep(Duration::from_millis(500));
+//! };
+//!
 //! ```
 
-use std::io::Read;
-use spidev::{ Spidev, SpidevOptions, SpiModeFlags };
+use rppal::spi::Spi;
 use thiserror::Error;
 
 /// An error emitted due to problems with the MAX6675.
 #[derive(Debug, Error)]
-pub enum Max6675Error {
-    #[error("Couldn't connect to the provided SPI path. See std::io::Error: {source}")]
-    IoError {
+pub enum Error {
+    #[error("Error using the provided SPI. See rppal::spi::Error: {source}")]
+    SPI {
         #[from]
-        source: std::io::Error,
+        source: rppal::spi::Error,
     },
     #[error("The MAX6675 detected an open circuit (bit D2 was high). Please check the thermocouple connection and try again.")]
-    OpenCircuitError,
-    #[error("The SPI connection to the MAX6675 has not been completed, plese run `connect()` and try again.")] 
-    SpiUninitialized,
-}
-
-/// SPI options for connecting to MAX6675
-pub const SPI_OPTIONS: SpidevOptions = SpidevOptions {
-    bits_per_word: Some(8),
-    max_speed_hz: Some(1_000_000),
-    lsb_first: None,
-    spi_mode: Some(SpiModeFlags::SPI_MODE_1),
-};
-
-/// Tries to create a new `Max6675` based on the given SPI path.
-/// A valid SPI path usually looks like `/dev/spidev0.0`.
-///
-/// Only fails if there's something wrong with the SPI connection.
-///
-/// ## Example
-///
-/// ```no_run
-///
-/// let mut tc = linux_max6675::open("/dev/spidev0.0").unwrap();
-/// let bytes = linux_max6675::read_bytes(&mut tc).unwrap();
-/// 
-/// if linux_max6675::is_open(bytes) {
-///     println("thermocouple is open!")
-/// };
-///
-/// ````
-pub fn open(path: impl AsRef<str>) -> Result<Spidev, Max6675Error> {
-    // Open SPI connection
-    let mut spi = Spidev::open(path.as_ref())?;
-    // Configure SPI for MAX6675
-    spi.configure(&SPI_OPTIONS)?;
-    // Return SPI connection
-    Ok(spi)
+    OpenCircuit,
 }
 
 /// Tries to return the thermocouple's raw data for data science. (and other fun little things)
 ///
+/// Only fails if there's something wrong with the SPI connection.
+///
 /// Refer to page 5 of [Maxim Integrated's MAX6675 specsheet](https://www.analog.com/media/en/technical-documentation/data-sheets/MAX6675.pdf)
 /// for info on how to interpret this raw data.
-///
-/// ## Example
-///
-/// ```no_run
-///
-/// let mut tc = linux_max6675::open("/dev/spidev0.0").unwrap();     
-/// let bytes = linux_max6675::read_bytes(&mut tc).unwrap();
-///
-/// println!("oOoo here's my favorite bytes: {}", bytes);
-///     
-/// ```
-pub fn read_bytes(spi: &mut Spidev) -> Result<u16, Max6675Error> {
+pub fn read(spi: &mut Spi) -> Result<u16, Error> {
     // Create 2 bytes buffer
     let mut buf = [0_u8; 2];
     // Read bytes from SPI
-    spi.read_exact(&mut buf)?;
+    spi.read(&mut buf)?;
     // Return bytes as u16
     Ok(u16::from_be_bytes(buf))
 }
@@ -107,6 +67,27 @@ pub fn read_bytes(spi: &mut Spidev) -> Result<u16, Max6675Error> {
 ///
 /// Check for Bit D2 being high, indicating that the thermocouple input is open
 /// (see MAX6675 datasheet, p. 5)
+///
+/// ## Example
+///
+/// ```no_run
+///
+/// use rppal::spi::{ Spi, Bus, SlaveSelect, Mode };
+///
+/// let mut tc = Spi::new(
+///     Bus::Spi0,
+///     SlaveSelect::Ss0,
+///     1_000_000,
+///     Mode::Mode1
+/// ).unwrap();
+///
+/// let bytes = linux_max6675::read(&mut tc).unwrap();
+///
+/// if linux_max6675::is_open(bytes) {
+///     println("thermocouple is open!")
+/// };
+///
+/// ````
 pub fn is_open(bytes: u16) -> bool {
    (bytes & 0x04) != 0
 }
@@ -125,18 +106,26 @@ pub fn parse_celsius(bytes: u16) -> f64 {
 ///
 /// ```no_run
 ///
-/// let mut tc = linux_max6675::open("/dev/spidev0.0").unwrap();     
+/// use rppal::spi::{ Spi, Bus, SlaveSelect, Mode };
+///
+/// let mut tc = Spi::new(
+///     Bus::Spi0,
+///     SlaveSelect::Ss0,
+///     1_000_000,
+///     Mode::Mode1
+/// ).unwrap();
+///
 /// let celsius = linux_max6675::read_celsius(&mut tc).unwrap();
-/// 
+///
 /// println!("it's {}° celsius in here!", celsius);
-///     
+///
 /// ```
-pub fn read_celsius(spi: &mut Spidev) -> Result<f64, Max6675Error> {
+pub fn read_celsius(spi: &mut Spi) -> Result<f64, Error> {
     // Read bytes from SPI
-    let bytes = read_bytes(spi)?;
+    let bytes = read(spi)?;
     // Check if MAX6675 terminals are open
     is_open(bytes)
-        .then(|| Err(Max6675Error::OpenCircuitError))
+        .then(|| Err(Error::OpenCircuit))
         .map_or(Ok(()), |e| e)?;
     // Parse temperature from bytes
     Ok(parse_celsius(bytes))
