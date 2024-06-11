@@ -20,7 +20,7 @@ exclude = [".github", ".githooks", ".gitignore", "deny.toml", "Cargo.lock"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-spidev = "0.6.0"
+rppal = "0.17.1"
 thiserror = "1.0.50"
 
 [dev-dependencies]
