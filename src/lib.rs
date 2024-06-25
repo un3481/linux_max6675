@@ -44,6 +44,8 @@ pub enum Error {
     },
     #[error("The MAX6675 detected an open circuit (bit D2 was high). Please check the thermocouple connection and try again.")]
     OpenCircuit,
+    #[error("The SPI bus received nothing. Please check your SPI bus and CS and try again.")]
+    ReceivedNothing,
 }
 
 /// Tries to return the thermocouple's raw data for data science. (and other fun little things)
@@ -56,9 +58,14 @@ pub fn read(spi: &mut Spi) -> Result<u16, Error> {
     // Create 2 bytes buffer
     let mut buf = [0_u8; 2];
     // Read bytes from SPI
-    spi.read(&mut buf)?;
-    // Return bytes as u16
-    Ok(u16::from_be_bytes(buf))
+    let len = spi.read(&mut buf)?;
+    if len == 2 {
+        // Return bytes as u16
+        Ok(u16::from_be_bytes(buf))
+    } else {
+        // No bytes read
+        Err(Error::ReceivedNothing)
+    }
 }
 
 /// Check if MAX6675 terminals are open.
